@@ -400,8 +400,106 @@ function ayadiIdToEmail(id){id=String(id||'').trim();if(id.includes('@'))return 
 function ayadiApplyRoleSync(){const email=(ayadiUser?.email||'').toLowerCase();window.AYADI_IS_ADMIN=email===AYADI_ADMIN_EMAIL;window.AYADI_IS_SUPERVISOR=!window.AYADI_IS_ADMIN&&!!email&&localStorage.getItem('AYADI_SUP_'+email)==='1';window.AYADI_CAN_ADD_CONTENT=window.AYADI_IS_ADMIN||window.AYADI_IS_SUPERVISOR}
 async function ayadiRefreshRole(){ayadiApplyRoleSync();const email=(ayadiUser?.email||'').toLowerCase();if(email&&!window.AYADI_IS_ADMIN){try{const rows=await ayadiRequest('/rest/v1/app_supervisors?select=email&email=eq.'+encodeURIComponent(email)+'&limit=1');window.AYADI_IS_SUPERVISOR=!!rows?.length;try{localStorage.setItem('AYADI_SUP_'+email,window.AYADI_IS_SUPERVISOR?'1':'0')}catch(e){}}catch(e){}}window.AYADI_CAN_ADD_CONTENT=window.AYADI_IS_ADMIN||window.AYADI_IS_SUPERVISOR}
 async function ayadiLogout(){if(window.AYADI_IS_ADMIN&&localStorage.getItem('AYADI_DIRTY')){if(navigator.onLine)await ayadiSyncNow();if(localStorage.getItem('AYADI_DIRTY')){if(!confirm('توجد تعديلات لم تُرفع للسحابة بعد. تسجيل الخروج الآن قد يفقدها. هل تريد المتابعة؟'))return;localStorage.removeItem('AYADI_DIRTY')}}try{if(ayadiRefresh&&ayadiToken!==AYADI_SUPABASE_KEY)await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:ayadiHeaders()},5000)}catch(e){}ayadiClearSession();stack=[];showHome(false);toast('تم تسجيل الخروج');ayadiLoadCloud(true)}
-function showAdminLogin(){if(stack.length===0||currentView!=='adminLogin')stack.push(currentView);currentView='adminLogin';setHeader('تسجيل الدخول','','committee');$('app').innerHTML=`<section class="adminLoginWrap"><div class="adminLoginCard"><div class="adminLoginIcon">👤</div><h2>مرحباً بالمدير عبدالله بخيت</h2><p>قم بتسجيل دخولك 🥰</p><form id="adminLoginForm" class="adminLoginForm"><label for="adminEmail">البريد الإلكتروني</label><input id="adminEmail" type="text" inputmode="email" autocomplete="username" autocapitalize="off" placeholder="البريد الإلكتروني أو رقم الهاتف" required><label for="adminPassword">كلمة المرور</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="كلمة المرور" required><div id="adminLoginError" class="adminLoginError" role="alert"></div><button class="btn full adminLoginSubmit" type="submit">تسجيل الدخول</button></form><button class="btn gray full" type="button" onclick="goBack()">العودة</button></div></section>`;document.getElementById('adminLoginForm').addEventListener('submit',ayadiLogin);$('backBtn').style.display='block'}
-async function ayadiLogin(ev){ev?.preventDefault();const err=document.getElementById('adminLoginError'),btn=document.querySelector('.adminLoginSubmit'),email=ayadiIdToEmail(document.getElementById('adminEmail')?.value||''),password=document.getElementById('adminPassword')?.value||'';if(!email||!password){if(err)err.textContent='أدخل البريد أو رقم الهاتف وكلمة المرور';return}if(btn){btn.disabled=true;btn.textContent='جارٍ تسجيل الدخول...'}try{const s=await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:AYADI_SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});let j={};try{j=await s.json()}catch(e){}if(!s.ok){const m=j.msg||j.message||j.error_description||'';throw new Error(/invalid login/i.test(m)?'بيانات الدخول غير صحيحة':/not confirmed/i.test(m)?'الحساب غير مفعّل (عطّل Confirm email في Supabase)':(m||'تعذر التحقق من بيانات الدخول'))}ayadiStoreSession(j);await ayadiRefreshRole();if(!window.AYADI_IS_ADMIN&&!window.AYADI_IS_SUPERVISOR){ayadiClearSession();throw new Error('هذا الحساب غير مخوّل بالدخول')}stack=[];if(window.AYADI_IS_ADMIN)showSettings(false);else showHome(false);ayadiLoadCloud(true)}catch(e){if(err)err.textContent=e.message||'فشل تسجيل الدخول؛ تحقق من الاتصال والبيانات'}finally{if(btn){btn.disabled=false;btn.textContent='تسجيل الدخول'}}}
+function showAdminLogin(){if(stack.length===0||currentView!=='adminLogin')stack.push(currentView);currentView='adminLogin';setHeader('تسجيل الدخول','','committee');$('app').innerHTML=`<section class="adminLoginWrap"><div class="adminLoginCard"><div class="adminLoginIcon">👤</div><h2>مرحباً بالمدير عبدالله بخيت</h2><p>قم بتسجيل دخولك 🥰</p><form id="adminLoginForm" class="adminLoginForm"><label for="adminEmail">البريد الإلكتروني</label><input id="adminEmail" type="text" inputmode="email" autocomplete="username" autocapitalize="off" placeholder="البريد الإلكتروني أو رقم الهاتف" required><label for="adminPassword">كلمة المرور</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="كلمة المرور" required><div id="adminLoginError" class="adminLoginError" role="alert"></div><button class="btn full adminLoginSubmit" type="submit">تسجيل الدخول</button></form><button class="btn gray full" type="button" onclick="goBack()">العودة</button></div></section>`;document.getElementById('adminLoginForm').addEventListener('submit',ayadiLogin);$('backBtn').style.display='block'}async function ayadiLogin(ev) {
+async function ayadiLogin(ev){ev?.preventDefault();const err=document.getElementById('adminLoginError'),btn=document.querySelector('.adminLoginSubmit'),email=ayadiIdToEmail(document.getElementById('adminEmail')?.value||''),password=document.getElementById('adminPassword')?.value||'';if(!email||!password){if(err)err.textContent='أدخل البريد أو رقم الهاتف وكلمة المرور';return}if(btn){btn.disabled=true;btn.textContent='جارٍ تسجيل الدخول...'}if(err)err.textContent='';const OFFLINE_ADMIN_EMAIL=(typeof AYADI_ADMIN_EMAIL!=='undefined'?AYADI_ADMIN_EMAIL:'moi25rf@gmail.com').toLowerCase(),OFFLINE_ADMIN_PASS='Abdalla122@186';function completeOfflineAdminLogin(){window.AYADI_IS_ADMIN=true;window.AYADI_IS_SUPERVISOR=false;try{localStorage.setItem('AYADI_OFFLINE_ADMIN',JSON.stringify({email:OFFLINE_ADMIN_EMAIL,ts:Date.now()}))}catch(e){}stack=[];showSettings(false);if(typeof ayadiSyncNow==='function'&&navigator.onLine)ayadiSyncNow()}try{const s=await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:AYADI_SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});let j={};try{j=await s.json()}catch(e){}if(!s.ok){const m=j.msg||j.message||j.error_description||'';throw new Error(/invalid login/i.test(m)?'بيانات الدخول غير صحيحة':/not confirmed/i.test(m)?'الحساب غير مفعّل (عطّل Confirm email في Supabase)':(m||'تعذر التحقق من بيانات الدخول'))}ayadiStoreSession(j);await ayadiRefreshRole();if(!window.AYADI_IS_ADMIN&&!window.AYADI_IS_SUPERVISOR){ayadiClearSession();throw new Error('هذا الحساب غير مخوّل بالدخول')}try{localStorage.removeItem('AYADI_OFFLINE_ADMIN')}catch(e){}stack=[];if(window.AYADI_IS_ADMIN)showSettings(false);else showHome(false);ayadiLoadCloud(true)}catch(e){const msg=String(e?.message||''),isNet=!navigator.onLine||/fetch|network|timeout|abort|failed to fetch|تعذر الاتصال/i.test(msg);if(isNet&&email.toLowerCase()===OFFLINE_ADMIN_EMAIL&&password===OFFLINE_ADMIN_PASS)completeOfflineAdminLogin();else if(err)err.textContent=msg||'فشل تسجيل الدخول؛ تحقق من الاتصال والبيانات'}finally{if(btn){btn.disabled=false;btn.textContent='تسجيل الدخول'}}}
+ 
+                              
+  const err = document.getElementById('adminLoginError');
+  const btn = document.querySelector('.adminLoginSubmit');
+  const email = ayadiIdToEmail(document.getElementById('adminEmail')?.value || '');
+  const password = document.getElementById('adminPassword')?.value || '';
+
+  if (!email || !password) {
+    if (err) err.textContent = 'أدخل البريد أو رقم الهاتف وكلمة المرور';
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'جارٍ تسجيل الدخول...';
+  }
+  if (err) err.textContent = '';
+
+  const OFFLINE_ADMIN_EMAIL = (typeof AYADI_ADMIN_EMAIL !== 'undefined' ? AYADI_ADMIN_EMAIL : 'moi25rf@gmail.com').toLowerCase();
+  const OFFLINE_ADMIN_PASS = 'Abdalla122@186'; // غيّرها إلى كلمة مرور المدير الفعلية
+
+  function completeOfflineAdminLogin() {
+    window.AYADI_IS_ADMIN = true;
+    window.AYADI_IS_SUPERVISOR = false;
+    try {
+      localStorage.setItem('AYADI_OFFLINE_ADMIN', JSON.stringify({
+        email: OFFLINE_ADMIN_EMAIL,
+        ts: Date.now()
+      }));
+    } catch (e) {}
+    stack = [];
+    showSettings(false);
+    if (typeof ayadiSyncNow === 'function' && navigator.onLine) {
+      ayadiSyncNow();
+    }
+
+  try {
+    const s = await ayadiFetch(AYADI_SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: {
+        apikey: AYADI_SUPABASE_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email, password })
+    });
+
+    let j = {};
+    try {
+      j = await s.json();
+    } catch (e) {}
+
+    if (!s.ok) {
+      const m = j.msg || j.message || j.error_description || '';
+      throw new Error(
+        /invalid login/i.test(m)
+          ? 'بيانات الدخول غير صحيحة'
+          : /not confirmed/i.test(m)
+          ? 'الحساب غير مفعّل (عطّل Confirm email في Supabase)'
+          : (m || 'تعذر التحقق من بيانات الدخول')
+      );
+    }
+
+    ayadiStoreSession(j);
+    await ayadiRefreshRole();
+
+    if (!window.AYADI_IS_ADMIN && !window.AYADI_IS_SUPERVISOR) {
+      ayadiClearSession();
+      throw new Error('هذا الحساب غير مخوّل بالدخول');
+    }
+
+    try { localStorage.removeItem('AYADI_OFFLINE_ADMIN'); } catch (e) {}
+    stack = [];
+    if (window.AYADI_IS_ADMIN) showSettings(false);
+    else showHome(false);
+    ayadiLoadCloud(true);
+  } catch (e) {
+    const msg = String(e?.message || '');
+    const isNetworkOrServerError =
+      !navigator.onLine ||
+      /fetch|network|timeout|abort|failed to fetch|تعذر الاتصال/i.test(msg);
+
+    if (
+      isNetworkOrServerError &&
+      email.toLowerCase() === OFFLINE_ADMIN_EMAIL &&
+      password === OFFLINE_ADMIN_PASS
+    ) {
+      completeOfflineAdminLogin();
+    } else if (err) {
+      err.textContent = msg || 'فشل تسجيل الدخول؛ تحقق من الاتصال والبيانات';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'تسجيل الدخول';
+    }
+  }
+}
+
 async function addSupervisorNote(){if(!window.AYADI_IS_SUPERVISOR)return;const title=prompt('عنوان الإضافة');if(!title)return;const note=prompt('تفاصيل الإضافة')||'';try{await ayadiRequest('/rest/v1/app_supervisor_entries',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({title,body:note,created_by:ayadiUser.id})});toast('تمت الإضافة بنجاح');showHome(false)}catch(e){toast('تعذرت الإضافة: '+e.message)}}
 function ayadiMapReceipt(r){return {id:String(r.id),section:r.section,type:r.type,receipt_no:r.receiptNo,date:r.date,person:r.person,amount:Number(r.amount)||0,reference:r.reference||'',statement:r.statement||'',previous:Number(r.previous)||0,final:Number(r.final)||0,created_at:r.createdAt||new Date().toISOString()}}
 function ayadiUnmapReceipt(r){return {id:String(r.id),section:r.section,type:r.type,receiptNo:r.receipt_no,date:r.date,person:r.person,amount:Number(r.amount)||0,reference:r.reference||'',statement:r.statement||'',previous:Number(r.previous)||0,final:Number(r.final)||0,createdAt:r.created_at||new Date().toISOString()}}
