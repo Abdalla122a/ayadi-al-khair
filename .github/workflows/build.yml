@@ -20,7 +20,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-
       - name: Install dependencies
         run: |
           rm -f capacitor.config.ts capacitor.config.mts capacitor.config.cts
