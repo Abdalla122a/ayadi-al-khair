@@ -30,11 +30,11 @@ jobs:
           npx cap sync android
       - name: Set App Icon
         run: |
+          pip3 install Pillow
           python3 -c "
           from PIL import Image
           import os, glob
           img = Image.open('committee-logo.png').convert('RGBA')
-          # خلفية بيضاء عشان الشفافية ما تبقى سوداء
           bg = Image.new('RGBA', img.size, (255,255,255,255))
           img = Image.alpha_composite(bg, img).convert('RGB')
           sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
