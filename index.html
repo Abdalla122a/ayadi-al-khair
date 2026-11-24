@@ -29,6 +29,7 @@
  .settingsList{display:grid;gap:9px}.settingRow{display:flex;align-items:center;gap:13px;width:100%;border:1px solid #e2e8f0;background:#fff;border-radius:16px;padding:14px 15px;text-align:right;font-size:16px;font-weight:800;color:#172554;box-shadow:0 2px 8px rgba(15,23,42,.04)}.settingIcon{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#eff6ff;font-size:21px}.settingArrow{margin-inline-start:auto;color:#94a3b8;font-size:25px}.settingsHub{background:linear-gradient(180deg,#fff,#f8fbff);border-color:#dbeafe}.settingsHub h2{color:#123d80}
 .adminLoginWrap{min-height:36vh;display:grid;place-items:center;padding:6px 8px}.adminLoginCard{width:min(100%,290px);background:linear-gradient(160deg,#fff,#f3f7ff);border:1px solid #dbeafe;border-radius:20px;padding:13px 14px;box-shadow:0 14px 36px rgba(20,60,120,.13);text-align:right}.adminLoginIcon{width:40px;height:40px;border-radius:16px;background:#e7efff;display:grid;place-items:center;font-size:24px;margin:0 auto 8px}.adminLoginCard h2{text-align:center;color:#123d80;margin:2px 0 4px;font-size:17px}.adminLoginCard p{text-align:center;color:#64748b;margin:0 0 12px;line-height:1.6;font-size:13px}.adminLoginForm{display:grid;gap:6px}.adminLoginForm label{font-size:13px}.adminLoginForm label{font-weight:800;color:#243b63}.adminLoginForm input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:13px;background:white;font-size:16px;direction:ltr;text-align:left}.adminLoginSubmit{margin-top:10px;background:#174ea6!important}.adminLoginError{color:#b91c1c;font-size:13px;min-height:18px}.adminLoginFoot{text-align:center;color:#94a3b8;font-size:12px;margin-top:10px}.adminLoginCard .btn{padding:11px 10px;font-size:15px;margin-top:8px}.settingsHub .hint{display:none}
 </style>
+ <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div id="toast" class="toast"></div>
@@ -60,6 +61,37 @@
 'use strict';
 const LS_KEY='AYADI_RECEIPTS_V4_DATA';
 const DEFAULT_COMMITTEE_LOGO='./assets/committee-logo.png';
+ // === ربط السحابة - أيادي الخير ===
+const SUPABASE_URL = "https://blxavmlfwknznwqqcoax.supabase.co";
+const SUPABASE_KEY = "sb_publishable_VIEGoovGujrIW1Srk5n-Eg_LMOHd9WZ";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+async function syncToCloud(){
+  try{
+    const raw = localStorage.getItem('AYADI_RECEIPTS_V4_DATA');
+    if(!raw) return;
+    const data = JSON.parse(raw);
+    if(!data || !data.receipts) return;
+    const rows = data.receipts.map(r => ({ id: r.id, data: r, updated_at: new Date().toISOString() }));
+    await sb.from('receipts').upsert(rows);
+    console.log('تمت المزامنة ✅');
+  }catch(e){ console.log('السحابة:', e.message); }
+}
+async function loadFromCloud(){
+  try{
+    const { data } = await sb.from('receipts').select('data');
+    if(data && data.length){
+      const local = JSON.parse(localStorage.getItem('AYADI_RECEIPTS_V4_DATA') || '{"receipts":[]}');
+      const cloudIds = new Set(data.map(x => x.data.id));
+      const merged = [...local.receipts.filter(r => !cloudIds.has(r.id)), ...data.map(x => x.data)];
+      local.receipts = merged;
+      localStorage.setItem('AYADI_RECEIPTS_V4_DATA', JSON.stringify(local));
+      location.reload();
+    }
+  }catch(e){}
+}
+loadFromCloud();
+const _oldSave = saveData;
+saveData = function(){ _oldSave(); syncToCloud(); };
 const DEFAULT_SCHOOL_LOGO='./assets/school-logo.png';
 const defaultData={
   settings:{"committeeName":"لجنة أيادي الخير للخدمة الإنسانية","schoolName":"مدرسة الهدى الخضراء","wellName":"بئر وحفير الهدى الخضراء","subtitle":"نظام إيصالات التوريد والصرف","accountantName":"عبدالله بخيت","treasurerName":"عباس علي","footerText":"تم إنشاء هذا الإيصال إلكترونيًا بواسطة نظام لجنة أيادي الخير","committeeLogo":"","schoolLogo":"","accountantSig":"./assets/signature.png","treasurerSig":""},
