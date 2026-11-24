@@ -1,0 +1,8 @@
+{
+  "appId": "com.aljawda.alkodrhn",
+  "appName": "لجنة أيادي الخير",
+  "webDir": "www",
+  "backgroundColor": "#0f6b3a",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}
