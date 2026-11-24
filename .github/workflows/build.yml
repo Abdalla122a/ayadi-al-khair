@@ -22,11 +22,18 @@ jobs:
           cp committee-logo.png www/ 2>/dev/null || true
           cp apple-touch-icon.png www/ 2>/dev/null || true
           echo '{"name":"ayadi","version":"1.0.0","private":true}' > package.json
-          npm install @capacitor/core @capacitor/cli
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
       - name: Init Capacitor
         run: |
           npx cap init "Ayadi Al Khair" com.ayadi.khair --web-dir=www || true
           npx cap add android
+          npx cap sync android
+      - name: Set App Icon
+        run: |
+          mkdir -p resources
+          cp committee-logo.png resources/icon.png
+          cp committee-logo.png resources/splash.png
+          npx @capacitor/assets generate --iconBackgroundColor '#ffffff' --splashBackgroundColor '#ffffff' || true
           npx cap sync android
       - name: Build APK
         run: |
