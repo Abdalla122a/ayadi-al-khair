@@ -90,7 +90,7 @@ async function loadFromCloud(){
   }catch(e){}
 }
 loadFromCloud();
-const _oldSave = saveData;
+loadFromCloud().catch(e=>{console.log(e)}).finally(()=>{try{showHome()}catch(e){}});
 saveData = function(){ _oldSave(); syncToCloud(); };
 const DEFAULT_SCHOOL_LOGO='./assets/school-logo.png';
 const defaultData={
