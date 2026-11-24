@@ -62,35 +62,57 @@
 const LS_KEY='AYADI_RECEIPTS_V4_DATA';
 const DEFAULT_COMMITTEE_LOGO='./assets/committee-logo.png';
  // === ربط السحابة - أيادي الخير ===
-const SUPABASE_URL = "https://blxavmlfwknznwqqcoax.supabase.co";
-sb_publishable_VIEGoovGujrIW1Srk5n-Eg_LMOHd9WZ
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-async function syncToCloud(){
-  try{
+const SUPABASE_URL = 'https://blxavmlfwknzrwqqcoax.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_VIEGoovGujrIW1Srk5n-Eg_LMOHd9WZ';
+const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+async function syncToCloud() {
+  if (!sb) return;
+  try {
     const raw = localStorage.getItem('AYADI_RECEIPTS_V4_DATA');
-    if(!raw) return;
+    if (!raw) return;
     const data = JSON.parse(raw);
-    if(!data || !data.receipts) return;
-    const rows = data.receipts.map(r => ({ id: r.id, data: r, updated_at: new Date().toISOString() }));
-    await sb.from('receipts').upsert(rows);
-    console.log('تمت المزامنة ✅');
-  }catch(e){ console.log('السحابة:', e.message); }
-}
-async function loadFromCloud(){
-  try{
-    const { data } = await sb.from('receipts').select('data');
-    if(data && data.length){
-      const local = JSON.parse(localStorage.getItem('AYADI_RECEIPTS_V4_DATA') || '{"receipts":[]}');
-      const cloudIds = new Set(data.map(x => x.data.id));
-      const merged = [...local.receipts.filter(r => !cloudIds.has(r.id)), ...data.map(x => x.data)];
-      local.receipts = merged;
-      localStorage.setItem('AYADI_RECEIPTS_V4_DATA', JSON.stringify(local));
-      location.reload();
+    if (!data || !Array.isArray(data.receipts)) return;
+    const rows = data.receipts.map(r => ({
+      id: r.id,
+      data: r,
+      updated_at: new Date().toISOString()
+    }));
+    const { error } = await sb.from('receipts').upsert(rows);
+    if (error) {
+      console.log('المزامنة:', error.message);
+      return;
     }
-  }catch(e){}
+    console.log('تمت المزامنة ✅');
+  } catch (e) {
+    console.log('المزامنة:', e.message);
+  }
 }
-loadFromCloud();
-loadFromCloud().catch(e=>{console.log(e)}).finally(()=>{try{showHome()}catch(e){}});
+
+async function loadFromCloud() {
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from('receipts').select('data');
+    if (error || !data || !data.length) return;
+    const local = JSON.parse(localStorage.getItem('AYADI_RECEIPTS_V4_DATA') || '{"receipts":[]}');
+    const localReceipts = Array.isArray(local.receipts) ? local.receipts : [];
+    const cloudReceipts = data.map(x => x.data).filter(Boolean);
+    const cloudIds = new Set(cloudReceipts.map(x => x.id));
+    local.receipts = [
+      ...localReceipts.filter(r => !cloudIds.has(r.id)),
+      ...cloudReceipts
+    ];
+    localStorage.setItem('AYADI_RECEIPTS_V4_DATA', JSON.stringify(local));
+  } catch (e) {
+    console.log('الجلب:', e.message);
+  }
+}
+
+loadFromCloud().catch(e => { console.log(e); }).finally(() => {
+  try { showHome(); } catch (e) {}
+});
+const _oldSave = saveData;
+
 saveData = function(){ _oldSave(); syncToCloud(); };
 const DEFAULT_SCHOOL_LOGO='./assets/school-logo.png';
 const defaultData={
