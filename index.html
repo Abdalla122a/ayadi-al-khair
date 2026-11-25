@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#0f6b3a">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="أيادي الخيـر">
+<meta name="apple-mobile-web-app-title" content="أيادي الخير">
 <meta name="application-name" content="أيادي الخير">
 
 <title>لجنة أيادي الخير للخدمة الإنسانية</title>
@@ -218,7 +218,22 @@ function prefix(section,type){
 function counterKey(section,type){return `${section}_${type}`}
 function maxNoFor(pfx){let m=0;const re=new RegExp('^'+pfx.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\d+)$');for(const r of data.receipts){const x=re.exec(r.receiptNo||'');if(x)m=Math.max(m,+x[1])}return m}
 function nextNo(section,type){const p=prefix(section,type);return p+String(Math.max(maxNoFor(p)+1,Number(data.counters[counterKey(section,type)])||1)).padStart(6,'0')}
-async function ayadiCloudMaxNo(pfx){if(!navigator.onLine)return 0;const re=new RegExp('^'+pfx.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\d+)$');let m=0;try{for(let off=0;;off+=1000){const rows=await ayadiRequest('/rest/v1/receipts?select=receipt_no&receipt_no=like.'+encodeURIComponent(pfx+'*')+'&order=id.asc&limit=1000&offset='+off);for(const r of rows||[]){const x=re.exec(r.receipt_no||'');if(x)m=Math.max(m,+x[1])}if(!rows||rows.length<1000)break}}catch(e){}return m}
+async function ayadiCloudMaxNo(pfx){
+  if(!navigator.onLine)return 0;
+  const re=new RegExp('^'+pfx.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\d+)$');
+  let m=0;
+  try{
+    const rows=await fbListDocs('receipts');
+    for(const r of rows||[]){
+      const no=r.receiptNo||r.receipt_no||'';
+      if(no.startsWith(pfx)){
+        const x=re.exec(no);
+        if(x)m=Math.max(m,+x[1]);
+      }
+    }
+  }catch(e){}
+  return m;
+}
 function stats(section){let list=data.receipts.filter(r=>r.section===section); let deposits=list.filter(r=>r.type==='deposit').reduce((a,r)=>a+Number(r.amount||0),0); let expenses=list.filter(r=>r.type==='expense').reduce((a,r)=>a+Number(r.amount||0),0); return {deposits,expenses,balance:deposits-expenses,count:list.length}}
 function balance(section){return stats(section).balance}
 function navigate(viewFn){stack.push(currentView); viewFn(); $('backBtn').style.display= stack.length?'block':'none'}
@@ -422,12 +437,6 @@ function clearAllReceipts(){
   stack=[];
   showHome(false);
 }
-async function addSupervisor(){if(!window.AYADI_IS_ADMIN){toast('هذه الوظيفة متاحة للمدير فقط');return}const digits=ayadiNormDigits($('supervisorPhone').value),pass=$('supervisorPass').value;if(digits.length<7){toast('أدخل رقم هاتف صحيحاً');return}if(pass.length<6){toast('كلمة المرور 6 أحرف على الأقل');return}const email=ayadiIdToEmail(digits);
-try{const r=await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/signup',{method:'POST',headers:{apikey:AYADI_SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});let j={};try{j=await r.json()}catch(e){}if(!r.ok&&!/already|registered|exists/i.test(j.msg||j.message||j.error_description||'')){toast('تعذر إنشاء حساب المشرف: '+(j.msg||j.message||j.error_description||r.status));return}}catch(e){toast(e.message);return}
-try{await ayadiRequest('/rest/v1/app_supervisors?on_conflict=email',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({email,phone:digits})})}catch(e){toast('تعذرت إضافة المشرف. نفّذ تحديث SQL المرفق أولاً');return}
-toast('تمت إضافة المشرف');$('supervisorPhone').value='';$('supervisorPass').value='';loadSupervisors()}
-async function loadSupervisors(){const el=$('supervisorList');if(!el)return;let rows;try{rows=await ayadiRequest('/rest/v1/app_supervisors?select=email,phone&order=created_at')}catch(e){el.textContent='يتطلب إنشاء جدول app_supervisors من ملف SQL المرفق';return}el.innerHTML=(rows||[]).map(x=>'<div class="record"><span dir="ltr">'+escapeHtml(x.phone||x.email)+'</span> <button type="button" class="btn small maroon" data-remove-supervisor="'+encodeURIComponent(x.email)+'">إزالة</button></div>').join('')||'لا يوجد مشرفون';el.querySelectorAll('[data-remove-supervisor]').forEach(b=>b.addEventListener('click',()=>removeSupervisor(b.dataset.removeSupervisor)))}
-async function removeSupervisor(e){const email=decodeURIComponent(e);if(!confirm('إزالة صلاحية المشرف؟'))return;try{await ayadiRequest('/rest/v1/app_supervisors?email=eq.'+encodeURIComponent(email),{method:'DELETE',headers:{Prefer:'return=minimal'}})}catch(err){toast('تعذرت إزالة المشرف');return}loadSupervisors()}
 
 function buildBackupPayload(){saveData(false);const snapshot=clone(data);return {format:'AYADI_KHAIR_UNIVERSAL_BACKUP',schemaVersion:4,appName:'لجنة أيادي الخير',sourceAppVersion:'HONOR-V10-SECTIONS-UNIVERSAL',exportedAt:new Date().toISOString(),data:snapshot,settings:snapshot.settings,receipts:snapshot.receipts,counters:snapshot.counters};}
 function backupFilename(){let d=new Date();return `ayadi-khair-backup-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.json`}
@@ -491,135 +500,582 @@ async function downloadPreview(){let canvas=$('receiptCanvas');if(!canvas){toast
 async function sharePreview(){let canvas=$('receiptCanvas');if(!canvas){toast('افتح المعاينة أولًا');return}let blob=await canvasToBlob(canvas),name=(activePreview?.receiptNo||'receipt')+'.png';if(isNative()){await nativeShare(name,blob,'إيصال لجنة أيادي الخير');return}if(window.AndroidBridge&&AndroidBridge.sharePngDataUrl){let r=new FileReader();r.onload=()=>AndroidBridge.sharePngDataUrl(name,r.result);r.readAsDataURL(blob);return}let file=new File([blob],name,{type:'image/png'});if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({title:'إيصال لجنة أيادي الخير',files:[file]});return}catch(e){}}await downloadPreview();toast('تم تنزيل الصورة')}
 function amountToArabicWords(n){n=Math.floor(Number(n)||0); if(n===0)return 'صفر جنيه'; const ones=['','واحد','اثنان','ثلاثة','أربعة','خمسة','ستة','سبعة','ثمانية','تسعة','عشرة','أحد عشر','اثنا عشر','ثلاثة عشر','أربعة عشر','خمسة عشر','ستة عشر','سبعة عشر','ثمانية عشر','تسعة عشر']; const tens=['','','عشرون','ثلاثون','أربعون','خمسون','ستون','سبعون','ثمانون','تسعون']; const hund=['','مائة','مئتان','ثلاثمائة','أربعمائة','خمسمائة','ستمائة','سبعمائة','ثمانمائة','تسعمائة']; function under1000(num){let h=Math.floor(num/100), r=num%100, arr=[]; if(h)arr.push(hund[h]); if(r){if(r<20)arr.push(ones[r]);else{let o=r%10,t=Math.floor(r/10);arr.push(o?ones[o]+' و '+tens[t]:tens[t])}} return arr.join(' و ')} function scale(num,sing,dual,plural){if(num===0)return ''; if(num===1)return sing; if(num===2)return dual; if(num>=3&&num<=10)return under1000(num)+' '+plural; return under1000(num)+' '+sing} let parts=[]; let b=Math.floor(n/1e9); n%=1e9; let m=Math.floor(n/1e6); n%=1e6; let th=Math.floor(n/1000); let rest=n%1000; if(b)parts.push(scale(b,'مليار','ملياران','مليارات')); if(m)parts.push(scale(m,'مليون','مليونان','ملايين')); if(th)parts.push(scale(th,'ألف','ألفان','آلاف')); if(rest)parts.push(under1000(rest)); return parts.join(' و ')+' جنيه'}
 
-// --- Supabase REST: local-first, cloud sync ---
-const AYADI_SUPABASE_URL='https://wjsntshaaxcwlvzfiazh.supabase.co';
-const AYADI_SUPABASE_KEY='sb_publishable_6VsKD12MkTFBQAlZSZPsng_aLeZHBSf';
-const AYADI_ADMIN_EMAIL='moi25rf@gmail.com';
-window.AYADI_IS_ADMIN=false;window.AYADI_IS_SUPERVISOR=false;window.AYADI_CLOUD_READY=false;
-let ayadiToken=localStorage.getItem('AYADI_SB_ACCESS')||AYADI_SUPABASE_KEY;
-let ayadiRefresh=localStorage.getItem('AYADI_SB_REFRESH')||'';
-let ayadiUser=null,ayadiSyncBusy=false;
-try{const uRaw=localStorage.getItem('AYADI_SB_USER');if(uRaw)ayadiUser=JSON.parse(uRaw)}catch(e){}
+// --- Firebase Auth + Firestore REST: local-first, cloud sync ---
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB7gi-0Lq_DHU6Ae7wmoaPtnZc0V0zPJEU",
+  projectId: "ayadi-al-khair"
+};
+const FB_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
+const FB_AUTH_BASE = `https://identitytoolkit.googleapis.com/v1`;
+const AYADI_ADMIN_EMAIL = 'moi25rf@gmail.com';
+const AYADI_PHONE_DOMAIN = 'supervisor.ayadi.app';
 
-const ayadiHeaders=(extra={})=>{const h={'apikey':AYADI_SUPABASE_KEY,'Content-Type':'application/json',...extra};if(ayadiToken&&ayadiToken!==AYADI_SUPABASE_KEY)h['Authorization']='Bearer '+ayadiToken;return h};
-function ayadiFetch(url,opts={},ms=15000){const ctl=typeof AbortController!=='undefined'?new AbortController():null;const t=ctl?setTimeout(()=>ctl.abort(),ms):0;return fetch(url,ctl?{...opts,signal:ctl.signal}:opts).catch(e=>{throw new Error(e&&e.name==='AbortError'?'انتهت مهلة الاتصال':'تعذر الاتصال بالخادم')}).finally(()=>clearTimeout(t))}
-let ayadiRefreshing=null;
-async function ayadiRefreshSession(){if(!ayadiRefresh)return false;if(!ayadiRefreshing){ayadiRefreshing=(async()=>{try{const rr=await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:AYADI_SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:ayadiRefresh})});if(!rr.ok)return false;ayadiStoreSession(await rr.json());return true}catch(e){return false}finally{setTimeout(()=>{ayadiRefreshing=null},0)}})()}return ayadiRefreshing}
-async function ayadiRequest(path,opts={}){let res=await ayadiFetch(AYADI_SUPABASE_URL+path,{...opts,headers:ayadiHeaders(opts.headers||{})});if((res.status===401||res.status===403)&&ayadiRefresh&&await ayadiRefreshSession()){res=await ayadiFetch(AYADI_SUPABASE_URL+path,{...opts,headers:ayadiHeaders(opts.headers||{})})}const body=await res.text();let json=null;try{json=body?JSON.parse(body):null}catch{}if(!res.ok){const e=new Error(json?.message||json?.msg||json?.error_description||body||('HTTP '+res.status));e.status=res.status;throw e}return json}
-function ayadiStoreSession(s){ayadiToken=s.access_token;ayadiRefresh=s.refresh_token||'';ayadiUser=s.user||null;localStorage.setItem('AYADI_SB_ACCESS',ayadiToken);if(ayadiRefresh)localStorage.setItem('AYADI_SB_REFRESH',ayadiRefresh);if(ayadiUser)localStorage.setItem('AYADI_SB_USER',JSON.stringify(ayadiUser));ayadiApplyRoleSync()}
-function ayadiClearSession(){ayadiToken=AYADI_SUPABASE_KEY;ayadiRefresh='';ayadiUser=null;['AYADI_SB_ACCESS','AYADI_SB_REFRESH','AYADI_SB_USER'].forEach(k=>localStorage.removeItem(k));window.AYADI_IS_ADMIN=false;window.AYADI_IS_SUPERVISOR=false;window.AYADI_CAN_ADD_CONTENT=false}
-const AYADI_PHONE_DOMAIN='supervisor.ayadi.app';
-function ayadiNormDigits(t){return ayadiNormDigits0(t).replace(/\D/g,'')}
-function ayadiIdToEmail(id){id=String(id||'').trim();if(id.includes('@'))return id.toLowerCase();const d=ayadiNormDigits(id);return d?('p'+d+'@'+AYADI_PHONE_DOMAIN):''}
-function ayadiApplyRoleSync(){const email=(ayadiUser?.email||'').toLowerCase();window.AYADI_IS_ADMIN=email===AYADI_ADMIN_EMAIL;window.AYADI_IS_SUPERVISOR=!window.AYADI_IS_ADMIN&&!!email&&localStorage.getItem('AYADI_SUP_'+email)==='1';window.AYADI_CAN_ADD_CONTENT=window.AYADI_IS_ADMIN||window.AYADI_IS_SUPERVISOR}
-async function ayadiRefreshRole(){ayadiApplyRoleSync();const email=(ayadiUser?.email||'').toLowerCase();if(email&&!window.AYADI_IS_ADMIN){try{const rows=await ayadiRequest('/rest/v1/app_supervisors?select=email&email=eq.'+encodeURIComponent(email)+'&limit=1');window.AYADI_IS_SUPERVISOR=!!rows?.length;try{localStorage.setItem('AYADI_SUP_'+email,window.AYADI_IS_SUPERVISOR?'1':'0')}catch(e){}}catch(e){}}window.AYADI_CAN_ADD_CONTENT=window.AYADI_IS_ADMIN||window.AYADI_IS_SUPERVISOR}
-async function ayadiLogout(){if(window.AYADI_IS_ADMIN&&localStorage.getItem('AYADI_DIRTY')){if(navigator.onLine)await ayadiSyncNow();if(localStorage.getItem('AYADI_DIRTY')){if(!confirm('توجد تعديلات لم تُرفع للسحابة بعد. تسجيل الخروج الآن قد يفقدها. هل تريد المتابعة؟'))return;localStorage.removeItem('AYADI_DIRTY')}}try{if(ayadiRefresh&&ayadiToken!==AYADI_SUPABASE_KEY)await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:ayadiHeaders()},5000)}catch(e){}ayadiClearSession();stack=[];showHome(false);toast('تم تسجيل الخروج');ayadiLoadCloud(true)}
-function showAdminLogin(push=true){if(push&&(stack.length===0||currentView!=='adminLogin'))stack.push(currentView);currentView='adminLogin';setHeader('تسجيل الدخول','','committee');$('app').innerHTML=`<section class="adminLoginWrap"><div class="adminLoginCard"><div class="adminLoginIcon">👤</div><h2>مرحباً بالمدير عبدالله بخيت</h2><p>قم بتسجيل دخولك 🥰</p><form id="adminLoginForm" class="adminLoginForm"><label for="adminEmail">البريد الإلكتروني</label><input id="adminEmail" type="text" inputmode="email" autocomplete="username" autocapitalize="off" placeholder="البريد الإلكتروني أو رقم الهاتف" required><label for="adminPassword">كلمة المرور</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="كلمة المرور" required><div id="adminLoginError" class="adminLoginError" role="alert"></div><button class="btn full adminLoginSubmit" type="submit">تسجيل الدخول</button></form><button class="btn gray full" type="button" onclick="goBack()">العودة</button></div></section>`;document.getElementById('adminLoginForm').addEventListener('submit',ayadiLogin);$('backBtn').style.display='block'}
-async function ayadiLogin(ev){ev?.preventDefault();const err=document.getElementById('adminLoginError'),btn=document.querySelector('.adminLoginSubmit'),email=ayadiIdToEmail(document.getElementById('adminEmail')?.value||''),password=document.getElementById('adminPassword')?.value||'';if(!email||!password){if(err)err.textContent='أدخل البريد أو رقم الهاتف وكلمة المرور';return}if(btn){btn.disabled=true;btn.textContent='جارٍ تسجيل الدخول...'}try{const s=await ayadiFetch(AYADI_SUPABASE_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:AYADI_SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});let j={};try{j=await s.json()}catch(e){}if(!s.ok){const m=j.msg||j.message||j.error_description||'';throw new Error(/invalid login/i.test(m)?'بيانات الدخول غير صحيحة':/not confirmed/i.test(m)?'الحساب غير مفعّل (عطّل Confirm email في Supabase)':(m||'تعذر التحقق من بيانات الدخول'))}ayadiStoreSession(j);await ayadiRefreshRole();if(!window.AYADI_IS_ADMIN&&!window.AYADI_IS_SUPERVISOR){ayadiClearSession();throw new Error('هذا الحساب غير مخوّل بالدخول')}stack=[];if(window.AYADI_IS_ADMIN)showSettings(false);else showHome(false);ayadiLoadCloud(true)}catch(e){if(err)err.textContent=e.message||'فشل تسجيل الدخول؛ تحقق من الاتصال والبيانات'}finally{if(btn){btn.disabled=false;btn.textContent='تسجيل الدخول'}}}
-async function addSupervisorNote(){if(!window.AYADI_IS_SUPERVISOR)return;const title=prompt('عنوان الإضافة');if(!title)return;const note=prompt('تفاصيل الإضافة')||'';try{await ayadiRequest('/rest/v1/app_supervisor_entries',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({title,body:note,created_by:ayadiUser.id})});toast('تمت الإضافة بنجاح');showHome(false)}catch(e){toast('تعذرت الإضافة: '+e.message)}}
-function ayadiMapReceipt(r){return {id:String(r.id),section:r.section,type:r.type,receipt_no:r.receiptNo,date:r.date,person:r.person,amount:Number(r.amount)||0,reference:r.reference||'',statement:r.statement||'',previous:Number(r.previous)||0,final:Number(r.final)||0,created_at:r.createdAt||new Date().toISOString()}}
-function ayadiUnmapReceipt(r){return {id:String(r.id),section:r.section,type:r.type,receiptNo:r.receipt_no,date:r.date,person:r.person,amount:Number(r.amount)||0,reference:r.reference||'',statement:r.statement||'',previous:Number(r.previous)||0,final:Number(r.final)||0,createdAt:r.created_at||new Date().toISOString()}}
-const ayadiSettingsMap={committeeName:'committee_name',schoolName:'school_name',wellName:'well_name',subtitle:'subtitle',accountantName:'accountant_name',treasurerName:'treasurer_name',footerText:'footer_text'};
-let ayadiLoadBusy=false;
-async function ayadiFetchAllReceipts(){let all=[];for(let off=0;;off+=1000){const rows=await ayadiRequest('/rest/v1/receipts?select=*&order=created_at.desc,id.asc&limit=1000&offset='+off);if(!Array.isArray(rows))throw new Error('استجابة غير متوقعة');all=all.concat(rows);if(rows.length<1000)break}return all}
-async function ayadiLoadCloud(silent=false){
-  if(ayadiLoadBusy)return;
-  ayadiLoadBusy=true;
-  try{
-    if(localStorage.getItem('AYADI_DIRTY')){
-      if(window.AYADI_IS_ADMIN){window.AYADI_CLOUD_READY=true;await ayadiSyncNow()}
+window.AYADI_IS_ADMIN = false;
+window.AYADI_IS_SUPERVISOR = false;
+window.AYADI_CAN_ADD_CONTENT = false;
+window.AYADI_CLOUD_READY = false;
+
+let ayadiSyncBusy = false;
+let ayadiLoadBusy = false;
+let ayadiRefreshing = null;
+let fbSession = null;
+try {
+  const sRaw = localStorage.getItem('AYADI_FB_SESSION') || localStorage.getItem('ayadi_fb_session');
+  if (sRaw) fbSession = JSON.parse(sRaw);
+} catch (e) {}
+
+function ayadiFetch(url, opts = {}, ms = 15000) {
+  const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const t = ctl ? setTimeout(() => ctl.abort(), ms) : 0;
+  return fetch(url, ctl ? { ...opts, signal: ctl.signal } : opts)
+    .catch(e => {
+      throw new Error(e && e.name === 'AbortError' ? 'انتهت مهلة الاتصال' : 'تعذر الاتصال بالخادم');
+    })
+    .finally(() => clearTimeout(t));
+}
+
+function saveFbSession(session) {
+  fbSession = session;
+  if (session) {
+    localStorage.setItem('AYADI_FB_SESSION', JSON.stringify(session));
+    localStorage.setItem('ayadi_fb_session', JSON.stringify(session));
+  } else {
+    localStorage.removeItem('AYADI_FB_SESSION');
+    localStorage.removeItem('ayadi_fb_session');
+  }
+}
+
+async function fbSignIn(email, password) {
+  const res = await ayadiFetch(`${FB_AUTH_BASE}/accounts:signInWithPassword?key=${FIREBASE_CONFIG.apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: String(email || '').trim(),
+      password,
+      returnSecureToken: true
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const code = data?.error?.message || '';
+    if (/INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND|INVALID_PASSWORD/i.test(code)) {
+      throw new Error('بيانات الدخول غير صحيحة');
+    }
+    if (/USER_DISABLED/i.test(code)) {
+      throw new Error('هذا الحساب معطّل');
+    }
+    throw new Error(code || 'فشل تسجيل الدخول في Firebase');
+  }
+  const session = {
+    email: (data.email || email || '').toLowerCase(),
+    localId: data.localId || '',
+    idToken: data.idToken,
+    refreshToken: data.refreshToken,
+    expiresAt: Date.now() + Number(data.expiresIn || 3600) * 1000
+  };
+  saveFbSession(session);
+  return session;
+}
+
+async function fbGetValidToken() {
+  if (!fbSession || !fbSession.refreshToken) return null;
+  if (fbSession.expiresAt && Date.now() < fbSession.expiresAt - 60000 && fbSession.idToken) {
+    return fbSession.idToken;
+  }
+  if (!ayadiRefreshing) {
+    ayadiRefreshing = (async () => {
+      try {
+        const res = await ayadiFetch(`${FB_AUTH_BASE}/token?key=${FIREBASE_CONFIG.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: fbSession.refreshToken
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.id_token) return null;
+        fbSession = {
+          ...fbSession,
+          email: (fbSession.email || '').toLowerCase(),
+          idToken: data.id_token,
+          refreshToken: data.refresh_token || fbSession.refreshToken,
+          expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000
+        };
+        saveFbSession(fbSession);
+        return fbSession.idToken;
+      } catch (e) {
+        return null;
+      } finally {
+        setTimeout(() => { ayadiRefreshing = null; }, 0);
+      }
+    })();
+  }
+  return ayadiRefreshing;
+}
+
+function fbSignOut() {
+  saveFbSession(null);
+  window.AYADI_IS_ADMIN = false;
+  window.AYADI_IS_SUPERVISOR = false;
+  window.AYADI_CAN_ADD_CONTENT = false;
+}
+
+function toFirestoreValue(val) {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+  }
+  if (typeof val === 'string') return { stringValue: val };
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(toFirestoreValue) } };
+  }
+  if (typeof val === 'object') {
+    const fields = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== undefined) fields[k] = toFirestoreValue(v);
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function fromFirestoreValue(fsVal) {
+  if (!fsVal || typeof fsVal !== 'object') return null;
+  if ('nullValue' in fsVal) return null;
+  if ('booleanValue' in fsVal) return fsVal.booleanValue;
+  if ('integerValue' in fsVal) return Number(fsVal.integerValue);
+  if ('doubleValue' in fsVal) return Number(fsVal.doubleValue);
+  if ('stringValue' in fsVal) return fsVal.stringValue;
+  if ('arrayValue' in fsVal) {
+    return (fsVal.arrayValue?.values || []).map(fromFirestoreValue);
+  }
+  if ('mapValue' in fsVal) {
+    const obj = {};
+    for (const [k, v] of Object.entries(fsVal.mapValue?.fields || {})) {
+      obj[k] = fromFirestoreValue(v);
+    }
+    return obj;
+  }
+  return null;
+}
+
+function docToObject(doc) {
+  const obj = {};
+  for (const [k, v] of Object.entries(doc.fields || {})) {
+    obj[k] = fromFirestoreValue(v);
+  }
+  const parts = (doc.name || '').split('/');
+  if (!obj.id && parts.length) obj.id = parts[parts.length - 1];
+  return obj;
+}
+
+async function fbGetDoc(collectionName, docId) {
+  const token = await fbGetValidToken();
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const url = `${FB_REST_BASE}/${collectionName}/${encodeURIComponent(String(docId))}`;
+  const res = await ayadiFetch(url, { headers });
+  if (res.status === 404) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data?.error?.message || `فشل قراءة المستند من ${collectionName}`);
+    err.status = res.status;
+    throw err;
+  }
+  return docToObject(data);
+}
+
+async function fbUpsertDoc(collectionName, docId, payload) {
+  const token = await fbGetValidToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const fields = {};
+  for (const [k, v] of Object.entries(payload || {})) {
+    if (v !== undefined) fields[k] = toFirestoreValue(v);
+  }
+  const url = `${FB_REST_BASE}/${collectionName}/${encodeURIComponent(String(docId))}`;
+  const res = await ayadiFetch(url, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ fields })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data?.error?.message || `فشل حفظ المستند في ${collectionName}`);
+    err.status = res.status;
+    throw err;
+  }
+  return docToObject(data);
+}
+
+async function fbListDocs(collectionName) {
+  const token = await fbGetValidToken();
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  let all = [];
+  let pageToken = '';
+  do {
+    const q = new URLSearchParams({ pageSize: '1000' });
+    if (pageToken) q.set('pageToken', pageToken);
+    const url = `${FB_REST_BASE}/${collectionName}?${q.toString()}`;
+    const res = await ayadiFetch(url, { headers });
+    if (res.status === 404) return [];
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data?.error?.message || `فشل قراءة ${collectionName}`);
+      err.status = res.status;
+      throw err;
+    }
+    all = all.concat((data.documents || []).map(docToObject));
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return all;
+}
+
+async function fbDeleteDoc(collectionName, docId) {
+  const token = await fbGetValidToken();
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const url = `${FB_REST_BASE}/${collectionName}/${encodeURIComponent(String(docId))}`;
+  const res = await ayadiFetch(url, { method: 'DELETE', headers });
+  if (!res.ok && res.status !== 404) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data?.error?.message || `فشل حذف المستند من ${collectionName}`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
+function ayadiNormDigits(t) { return ayadiNormDigits0(t).replace(/\D/g, ''); }
+function ayadiIdToEmail(id) {
+  id = String(id || '').trim();
+  if (id.includes('@')) return id.toLowerCase();
+  const d = ayadiNormDigits(id);
+  return d ? ('p' + d + '@' + AYADI_PHONE_DOMAIN) : '';
+}
+
+function ayadiApplyRoleSync() {
+  const email = (fbSession?.email || '').toLowerCase();
+  window.AYADI_IS_ADMIN = !!email && email === AYADI_ADMIN_EMAIL.toLowerCase();
+  window.AYADI_IS_SUPERVISOR = !window.AYADI_IS_ADMIN && !!email && localStorage.getItem('AYADI_SUP_' + email) === '1';
+  window.AYADI_CAN_ADD_CONTENT = window.AYADI_IS_ADMIN || window.AYADI_IS_SUPERVISOR;
+}
+
+async function ayadiRefreshRole() {
+  ayadiApplyRoleSync();
+  const email = (fbSession?.email || '').toLowerCase();
+  if (email && !window.AYADI_IS_ADMIN) {
+    try {
+      const doc = await fbGetDoc('app_supervisors', encodeURIComponent(email));
+      window.AYADI_IS_SUPERVISOR = !!doc;
+      try { localStorage.setItem('AYADI_SUP_' + email, window.AYADI_IS_SUPERVISOR ? '1' : '0'); } catch (e) {}
+    } catch (e) {}
+  }
+  window.AYADI_CAN_ADD_CONTENT = window.AYADI_IS_ADMIN || window.AYADI_IS_SUPERVISOR;
+}
+
+async function ayadiLogout() {
+  if (window.AYADI_IS_ADMIN && localStorage.getItem('AYADI_DIRTY')) {
+    if (navigator.onLine) await ayadiSyncNow();
+    if (localStorage.getItem('AYADI_DIRTY')) {
+      if (!confirm('توجد تعديلات لم تُرفع للسحابة بعد. تسجيل الخروج الآن قد يفقدها. هل تريد المتابعة؟')) return;
+      localStorage.removeItem('AYADI_DIRTY');
+    }
+  }
+  fbSignOut();
+  stack = [];
+  showHome(false);
+  toast('تم تسجيل الخروج');
+  ayadiLoadCloud(true);
+}
+
+function showAdminLogin(push = true) {
+  if (push && (stack.length === 0 || currentView !== 'adminLogin')) stack.push(currentView);
+  currentView = 'adminLogin';
+  setHeader('تسجيل الدخول', '', 'committee');
+  $('app').innerHTML = `<section class="adminLoginWrap"><div class="adminLoginCard"><div class="adminLoginIcon">👤</div><h2>مرحباً بالمدير عبدالله بخيت</h2><p>قم بتسجيل دخولك 🥰</p><form id="adminLoginForm" class="adminLoginForm"><label for="adminEmail">البريد الإلكتروني</label><input id="adminEmail" type="text" inputmode="email" autocomplete="username" autocapitalize="off" placeholder="البريد الإلكتروني أو رقم الهاتف" required><label for="adminPassword">كلمة المرور</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="كلمة المرور" required><div id="adminLoginError" class="adminLoginError" role="alert"></div><button class="btn full adminLoginSubmit" type="submit">تسجيل الدخول</button></form><button class="btn gray full" type="button" onclick="goBack()">العودة</button></div></section>`;
+  document.getElementById('adminLoginForm').addEventListener('submit', ayadiLogin);
+  $('backBtn').style.display = 'block';
+}
+
+async function ayadiLogin(ev) {
+  ev?.preventDefault();
+  const err = document.getElementById('adminLoginError');
+  const btn = document.querySelector('.adminLoginSubmit');
+  const email = ayadiIdToEmail(document.getElementById('adminEmail')?.value || '');
+  const password = document.getElementById('adminPassword')?.value || '';
+  if (err) err.textContent = '';
+  if (!email || !password) {
+    if (err) err.textContent = 'أدخل البريد أو رقم الهاتف وكلمة المرور';
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ تسجيل الدخول...'; }
+  try {
+    await fbSignIn(email, password);
+    await ayadiRefreshRole();
+    if (!window.AYADI_IS_ADMIN && !window.AYADI_IS_SUPERVISOR) {
+      fbSignOut();
+      throw new Error('هذا الحساب غير مخوّل بالدخول');
+    }
+    stack = [];
+    if (window.AYADI_IS_ADMIN) showSettings(false);
+    else showHome(false);
+    ayadiLoadCloud(true);
+  } catch (e) {
+    if (err) err.textContent = e.message || 'فشل تسجيل الدخول؛ تحقق من الاتصال والبيانات';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول'; }
+  }
+}
+
+async function addSupervisor() {
+  if (!window.AYADI_IS_ADMIN) { toast('هذه الوظيفة متاحة للمدير فقط'); return; }
+  const digits = ayadiNormDigits($('supervisorPhone').value);
+  const pass = $('supervisorPass').value;
+  if (digits.length < 7) { toast('أدخل رقم هاتف صحيحاً'); return; }
+  if (pass.length < 6) { toast('كلمة المرور 6 أحرف على الأقل'); return; }
+  const email = ayadiIdToEmail(digits);
+  try {
+    const r = await ayadiFetch(`${FB_AUTH_BASE}/accounts:signUp?key=${FIREBASE_CONFIG.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass, returnSecureToken: false })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok && !/EMAIL_EXISTS/i.test(j?.error?.message || '')) {
+      toast('تعذر إنشاء حساب المشرف: ' + (j?.error?.message || r.status));
       return;
     }
-    const rows=await ayadiFetchAllReceipts();
-    let ss=null;
-    try{ss=(await ayadiRequest('/rest/v1/settings?select=*&id=eq.1&limit=1'))?.[0]||null}catch(e){}
-    const synced=!!(ss&&ss.app_data&&ss.app_data.synced);
-    if(rows.length||synced){
-      data.receipts=rows.map(ayadiUnmapReceipt);
-    }else if(window.AYADI_IS_ADMIN&&data.receipts.length){
-      try{localStorage.setItem('AYADI_DIRTY','1')}catch(e){}
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  try {
+    await fbUpsertDoc('app_supervisors', encodeURIComponent(email), {
+      email,
+      phone: digits,
+      createdAt: new Date().toISOString()
+    });
+  } catch (e) {
+    toast('تعذرت إضافة المشرف: ' + e.message);
+    return;
+  }
+  toast('تمت إضافة المشرف');
+  $('supervisorPhone').value = '';
+  $('supervisorPass').value = '';
+  loadSupervisors();
+}
+
+async function loadSupervisors() {
+  const el = $('supervisorList');
+  if (!el) return;
+  let rows;
+  try {
+    rows = await fbListDocs('app_supervisors');
+  } catch (e) {
+    el.textContent = 'تعذر تحميل المشرفين: ' + e.message;
+    return;
+  }
+  rows.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  el.innerHTML = (rows || []).map(x => '<div class="record"><span dir="ltr">' + escapeHtml(x.phone || x.email) + '</span> <button type="button" class="btn small maroon" data-remove-supervisor="' + encodeURIComponent(x.email) + '">إزالة</button></div>').join('') || 'لا يوجد مشرفون';
+  el.querySelectorAll('[data-remove-supervisor]').forEach(b => b.addEventListener('click', () => removeSupervisor(b.dataset.removeSupervisor)));
+}
+
+async function removeSupervisor(e) {
+  const email = decodeURIComponent(e);
+  if (!confirm('إزالة صلاحية المشرف؟')) return;
+  try {
+    await fbDeleteDoc('app_supervisors', encodeURIComponent(email));
+  } catch (err) {
+    toast('تعذرت إزالة المشرف');
+    return;
+  }
+  loadSupervisors();
+}
+
+async function addSupervisorNote() {
+  if (!window.AYADI_IS_SUPERVISOR) return;
+  const title = prompt('عنوان الإضافة');
+  if (!title) return;
+  const note = prompt('تفاصيل الإضافة') || '';
+  try {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    await fbUpsertDoc('app_supervisor_entries', id, {
+      id,
+      title,
+      body: note,
+      createdBy: fbSession?.email || fbSession?.localId || '',
+      createdAt: new Date().toISOString()
+    });
+    toast('تمت الإضافة بنجاح');
+    showHome(false);
+  } catch (e) {
+    toast('تعذرت الإضافة: ' + e.message);
+  }
+}
+
+function ayadiNormalizeReceiptDoc(r) {
+  return {
+    id: String(r.id),
+    section: r.section,
+    type: r.type,
+    receiptNo: r.receiptNo || r.receipt_no || '',
+    date: r.date || '',
+    person: r.person || '',
+    amount: Number(r.amount) || 0,
+    reference: r.reference || '',
+    statement: r.statement || '',
+    previous: Number(r.previous) || 0,
+    final: Number(r.final) || 0,
+    createdAt: r.createdAt || r.created_at || new Date().toISOString()
+  };
+}
+
+async function ayadiFetchAllReceipts() {
+  const rows = await fbListDocs('receipts');
+  if (!Array.isArray(rows)) throw new Error('استجابة غير متوقعة');
+  rows.sort((a, b) => String(b.createdAt || b.created_at || '').localeCompare(String(a.createdAt || a.created_at || '')) || String(a.id || '').localeCompare(String(b.id || '')));
+  return rows;
+}
+
+async function ayadiLoadCloud(silent = false) {
+  if (ayadiLoadBusy) return;
+  ayadiLoadBusy = true;
+  try {
+    if (localStorage.getItem('AYADI_DIRTY')) {
+      if (window.AYADI_IS_ADMIN) {
+        window.AYADI_CLOUD_READY = true;
+        await ayadiSyncNow();
+      }
+      return;
     }
-    if(ss){
-      for(const [local,col] of Object.entries(ayadiSettingsMap))if(ss[col]!=null&&ss[col]!=='')data.settings[local]=ss[col];
-      const ad=ss.app_data;
-      if(ad&&typeof ad==='object'){
-        if(ad.settings)data.settings={...data.settings,...ad.settings,...Object.fromEntries(Object.entries(ayadiSettingsMap).filter(([l,c])=>ss[c]!=null&&ss[c]!=='').map(([l,c])=>[l,ss[c]]))};
-        if(Array.isArray(ad.sections)&&ad.sections.length)data.sections=ad.sections;
-        if(ad.counters){for(const k of Object.keys(ad.counters))data.counters[k]=Math.max(Number(data.counters[k])||1,Number(ad.counters[k])||1)}
+    const rows = await ayadiFetchAllReceipts();
+    let ss = null;
+    try { ss = await fbGetDoc('settings', 'main'); } catch (e) {}
+    const synced = !!(ss && (ss.synced || (ss.app_data && ss.app_data.synced)));
+    if (rows.length || synced) {
+      data.receipts = rows.map(ayadiNormalizeReceiptDoc);
+    } else if (window.AYADI_IS_ADMIN && data.receipts.length) {
+      try { localStorage.setItem('AYADI_DIRTY', '1'); } catch (e) {}
+    }
+    if (ss) {
+      const ad = ss.app_data && typeof ss.app_data === 'object' ? ss.app_data : ss;
+      if (ad && typeof ad === 'object') {
+        if (ad.settings && typeof ad.settings === 'object') {
+          data.settings = { ...data.settings, ...ad.settings };
+        }
+        if (Array.isArray(ad.sections) && ad.sections.length) {
+          data.sections = ad.sections;
+        }
+        if (ad.counters && typeof ad.counters === 'object') {
+          for (const k of Object.keys(ad.counters)) {
+            data.counters[k] = Math.max(Number(data.counters[k]) || 1, Number(ad.counters[k]) || 1);
+          }
+        }
       }
     }
     ensureSectionsAndTheme();
     recalculateBalances();
     await shrinkStoredImages();
     saveData(false);
-    window.AYADI_CLOUD_READY=true;
-    if(window.AYADI_IS_ADMIN&&localStorage.getItem('AYADI_DIRTY'))await ayadiSyncNow();
-    if(currentView==='home')showHome(false);
-    else if(currentView==='history'&&!(document.activeElement&&document.activeElement.id==='histSearch'))showHistory(false,histSection);
-    if(!silent)toast('تم تحديث البيانات من السحابة');
-  }catch(e){
-    console.warn('Cloud read:',e);
-    if(!silent)toast('تعذر تحديث السحابة؛ البيانات المحلية محفوظة');
-  }finally{
-    ayadiLoadBusy=false;
+    window.AYADI_CLOUD_READY = true;
+    if (window.AYADI_IS_ADMIN && localStorage.getItem('AYADI_DIRTY')) await ayadiSyncNow();
+    if (currentView === 'home') showHome(false);
+    else if (currentView === 'history' && !(document.activeElement && document.activeElement.id === 'histSearch')) showHistory(false, histSection);
+    if (!silent) toast('تم تحديث البيانات من السحابة');
+  } catch (e) {
+    console.warn('Cloud read:', e);
+    if (!silent) toast('تعذر تحديث السحابة؛ البيانات المحلية محفوظة');
+  } finally {
+    ayadiLoadBusy = false;
   }
-}
-const ayadiPending=()=>{try{return JSON.parse(localStorage.getItem('AYADI_PENDING_DELETE_IDS')||'[]')}catch(e){return[]}};
-const ayadiSetPending=a=>{try{localStorage.setItem('AYADI_PENDING_DELETE_IDS',JSON.stringify([...new Set(a)]))}catch(e){}};
-async function ayadiDeleteRow(id){const rows=await ayadiRequest('/rest/v1/receipts?id=eq.'+encodeURIComponent(String(id)),{method:'DELETE',headers:{Prefer:'return=representation'}});if(Array.isArray(rows)&&rows.length)return true;const still=await ayadiRequest('/rest/v1/receipts?select=id&id=eq.'+encodeURIComponent(String(id)));if(Array.isArray(still)&&still.length)throw new Error('لا تملك صلاحية الحذف من السحابة (سجّل الدخول كمدير)');return true}
-async function ayadiDeleteCloud(id){ayadiSetPending([...ayadiPending(),String(id)]);if(!window.AYADI_IS_ADMIN||!navigator.onLine)return false;try{await ayadiDeleteRow(id);ayadiSetPending(ayadiPending().filter(x=>x!==String(id)));return true}catch(e){return false}}
-async function ayadiSyncNow(){
-  if(!window.AYADI_IS_ADMIN||ayadiSyncBusy||!window.AYADI_CLOUD_READY)return false;
-  ayadiSyncBusy=true;
-  const seq=window.__ayadiSeq||0;
-  try{
-    const left=[];
-    for(const id of ayadiPending()){
-      try{await ayadiDeleteRow(id)}catch(e){left.push(id);if(!navigator.onLine||/صلاحية/.test(e.message))throw e}
-    }
-    ayadiSetPending(left);
-    const pend=new Set(left);
-    const rows=data.receipts.filter(r=>!pend.has(String(r.id))).map(ayadiMapReceipt);
-    for(let i=0;i<rows.length;i+=200){
-      await ayadiRequest('/rest/v1/receipts?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(rows.slice(i,i+200))});
-    }
-    const base={id:1,...Object.fromEntries(Object.entries(ayadiSettingsMap).map(([k,v])=>[v,data.settings[k]??'']))};
-    const put=p=>ayadiRequest('/rest/v1/settings?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(p)});
-    try{await put({...base,app_data:{settings:data.settings,sections:data.sections,counters:data.counters,synced:true}})}
-    catch(e){if(/app_data/i.test(e.message))await put(base);else throw e}
-    if((window.__ayadiSeq||0)===seq&&!left.length)localStorage.removeItem('AYADI_DIRTY');
-    return true;
-  }catch(e){
-    console.warn('Cloud sync failed:',e);
-    if(navigator.onLine)toast('تعذرت المزامنة: '+e.message);
-    return false;
-  }finally{
-    ayadiSyncBusy=false;
-  }
-}
-window.AYADI_QUEUE_SYNC=()=>{clearTimeout(window.__ayadiSyncTimer);window.__ayadiSyncTimer=setTimeout(ayadiSyncNow,700)};
-async function deleteReceipt(id){
-  if(!window.AYADI_IS_ADMIN){toast('الحذف متاح للمدير فقط');return}
-  if(!confirm('هل تريد حذف هذا الإيصال؟ سيُحذف من الجهاز ومن السحابة.'))return;
-  data.receipts=data.receipts.filter(r=>String(r.id)!==String(id));
-  recalculateBalances();
-  saveData(false);
-  const ok=await ayadiDeleteCloud(id);
-  if(!ok){localStorage.setItem('AYADI_DIRTY','1');if(window.AYADI_QUEUE_SYNC)window.AYADI_QUEUE_SYNC()}
-  toast(ok?'تم حذف الإيصال من الجهاز والسحابة':'تم الحذف محلياً وسيُحذف من السحابة عند توفر الاتصال');
-  showHistory(false,histSection);
 }
 
-async function ayadiInit(){
+const ayadiPending = () => { try { return JSON.parse(localStorage.getItem('AYADI_PENDING_DELETE_IDS') || '[]'); } catch (e) { return []; } };
+const ayadiSetPending = a => { try { localStorage.setItem('AYADI_PENDING_DELETE_IDS', JSON.stringify([...new Set(a)])); } catch (e) {} };
+
+async function ayadiDeleteRow(id) {
+  await fbDeleteDoc('receipts', String(id));
+  return true;
+}
+
+async function ayadiDeleteCloud(id) {
+  ayadiSetPending([...ayadiPending(), String(id)]);
+  if (!window.AYADI_IS_ADMIN || !navigator.onLine) return false;
+  try {
+    await ayadiDeleteRow(id);
+    ayadiSetPending(ayadiPending().filter(x => x !== String(id)));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function ayadiSyncNow() {
+  if (!window.AYADI_IS_ADMIN || ayadiSyncBusy || !window.AYADI_CLOUD_READY) return false;
+  ayadiSyncBusy = true;
+  const seq = window.__ayadiSeq || 0;
+  try {
+    const left = [];
+    for (const id of ayadiPending()) {
+      try {
+        await ayadiDeleteRow(id);
+      } catch (e) {
+        left.push(id);
+        if (!navigator.onLine || /PERMISSION_DENIED|صلاحية/i.test(e.message)) throw e;
+      }
+    }
+    ayadiSetPending(left);
+    const pend = new Set(left);
+    const rows = data.receipts.filter(r => !pend.has(String(r.id))).map(ayadiNormalizeReceiptDoc);
+    for (const row of rows) {
+      await fbUpsertDoc('receipts', row.id, row);
+    }
+    await fbUpsertDoc('settings', 'main', {
+      id: 'main',
+      synced: true,
+      updatedAt: new Date().toISOString(),
+      settings: data.settings,
+      sections: data.sections,
+      counters: data.counters
+    });
+    if ((window.__ayadiSeq || 0) === seq && !left.length) localStorage.removeItem('AYADI_DIRTY');
+    return true;
+  } catch (e) {
+    console.warn('Cloud sync failed:', e);
+    if (navigator.onLine) toast('تعذرت المزامنة: ' + e.message);
+    return false;
+  } finally {
+    ayadiSyncBusy = false;
+  }
+}
+
+window.AYADI_QUEUE_SYNC = () => { clearTimeout(window.__ayadiSyncTimer); window.__ayadiSyncTimer = setTimeout(ayadiSyncNow, 700); };
+
+async function deleteReceipt(id) {
+  if (!window.AYADI_IS_ADMIN) { toast('الحذف متاح للمدير فقط'); return; }
+  if (!confirm('هل تريد حذف هذا الإيصال؟ سيُحذف من الجهاز ومن السحابة.')) return;
+  data.receipts = data.receipts.filter(r => String(r.id) !== String(id));
+  recalculateBalances();
+  saveData(false);
+  const ok = await ayadiDeleteCloud(id);
+  if (!ok) { localStorage.setItem('AYADI_DIRTY', '1'); if (window.AYADI_QUEUE_SYNC) window.AYADI_QUEUE_SYNC(); }
+  toast(ok ? 'تم حذف الإيصال من الجهاز والسحابة' : 'تم الحذف محلياً وسيُحذف من السحابة عند توفر الاتصال');
+  showHistory(false, histSection);
+}
+
+async function ayadiInit() {
   ayadiApplyRoleSync();
-  if(ayadiRefresh&&ayadiToken!==AYADI_SUPABASE_KEY){
-    await ayadiRefreshSession();
+  if (fbSession && fbSession.refreshToken) {
+    await fbGetValidToken();
     await ayadiRefreshRole();
   }
   await ayadiLoadCloud(true);
-  setInterval(()=>{if(navigator.onLine&&!document.hidden)ayadiLoadCloud(true)},20000);
-  window.addEventListener('online',()=>ayadiLoadCloud(true));
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&navigator.onLine)ayadiLoadCloud(true)});
+  setInterval(() => { if (navigator.onLine && !document.hidden) ayadiLoadCloud(true); }, 20000);
+  window.addEventListener('online', () => ayadiLoadCloud(true));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && navigator.onLine) ayadiLoadCloud(true); });
 }
 
 showHome(false);
